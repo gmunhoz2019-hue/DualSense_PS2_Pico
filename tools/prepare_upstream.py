@@ -18,6 +18,17 @@ for src in overlay.rglob("*"):
     dst.parent.mkdir(parents=True, exist_ok=True)
     shutil.copy2(src, dst)
 
+# Joypad OS 2.4.1 pins a TinyUSB revision where the synchronous descriptor
+# helpers return xfer_result_t. One Switch 2 source still uses the older
+# tusb_xfer_result_t spelling; patch that unrelated upstream build break so
+# our dedicated target can compile against the pinned submodules reproducibly.
+switch2 = root / "src/usb/usbh/hid/devices/vendors/nintendo/switch2_pro.c"
+if switch2.exists():
+    text = switch2.read_text()
+    text = text.replace("tusb_xfer_result_t result = tuh_descriptor_get_configuration_sync(",
+                        "xfer_result_t result = tuh_descriptor_get_configuration_sync(")
+    switch2.write_text(text)
+
 # Add a dedicated router output target.
 router_h = root / "src/core/router/router.h"
 text = router_h.read_text()
