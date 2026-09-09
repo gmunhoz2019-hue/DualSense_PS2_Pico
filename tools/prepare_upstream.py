@@ -57,7 +57,6 @@ target_compile_definitions(joypad_ps2_pico PRIVATE
     BOARD_TUH_RHPORT=1
     CONFIG_NO_NEOPIXEL=1
     USE_BOOTSEL_BUTTON=1
-    BOARD_LED_PIN=25
     MAX_PLAYERS=1
     MAX_PLAYERS_PER_OUTPUT=1
 )
@@ -80,6 +79,8 @@ target_link_libraries(joypad_ps2_pico PRIVATE
     hardware_flash
 )
 joypad_target_common(joypad_ps2_pico)
+# This pulls in BT_HOST_SOURCES + BTSTACK_SOURCES and defines CONFIG_BT_HOST=1,
+# which registers Sony's ds5_bt.c parser/feedback driver for DualSense.
 joypad_add_btstack(joypad_ps2_pico)
 pico_generate_pio_header(joypad_ps2_pico
     ${CMAKE_CURRENT_LIST_DIR}/native/device/ps2/ps2_bus.pio)
