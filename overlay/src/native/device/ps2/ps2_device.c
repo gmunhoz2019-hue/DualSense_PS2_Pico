@@ -24,6 +24,9 @@ static ds2_device_t g_ds2;
 static ds2_pad_state_t g_pad_buf[2];
 static volatile uint8_t g_pad_active = 0;
 static volatile uint32_t g_att_epoch = 0;
+static volatile uint32_t g_rx_byte_count = 0;
+static volatile uint32_t g_address_count = 0;
+static volatile uint32_t g_poll42_count = 0;
 
 static inline void set_active_low(uint8_t *v, uint8_t mask, bool pressed) {
     if (pressed) *v &= (uint8_t)~mask;
@@ -187,6 +190,13 @@ static void ps2_core1_task(void) {
             have_session = true;
         }
 
+        // Diagnostic counters let the LED distinguish ATT-only activity from
+        // actual decoded CLK/CMD bytes and a real 0x01 0x42 controller poll.
+        uint8_t byte_index = session.byte_index;
+        g_rx_byte_count++;
+        if (byte_index == 0 && rx == 0x01) g_address_count++;
+        if (byte_index == 1 && rx == 0x42) g_poll42_count++;
+
         ds2_session_rx(&session, rx);
 
         // Response to the NEXT command byte. DATA remains released for the first
@@ -198,6 +208,9 @@ static void ps2_core1_task(void) {
 uint8_t ps2_rumble_large(void) { return g_ds2.rumble_large; }
 uint8_t ps2_rumble_small(void) { return g_ds2.rumble_small; }
 uint32_t ps2_transaction_count(void) { return g_att_epoch; }
+uint32_t ps2_rx_byte_count(void) { return g_rx_byte_count; }
+uint32_t ps2_address_count(void) { return g_address_count; }
+uint32_t ps2_poll42_count(void) { return g_poll42_count; }
 
 const OutputInterface ps2_output_interface = {
     .name = "PlayStation 2 DualShock 2",
