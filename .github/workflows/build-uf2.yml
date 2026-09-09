@@ -1,0 +1,85 @@
+name: Build DualSense PS2 Pico UF2
+
+on:
+  push:
+    branches: [ main ]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    runs-on: ubuntu-24.04
+    steps:
+      - name: Checkout adapter project
+        uses: actions/checkout@v4
+        with:
+          path: adapter
+
+      - name: Checkout pinned Joypad OS
+        uses: actions/checkout@v4
+        with:
+          repository: joypad-ai/joypad-os
+          ref: 4bc05e89153993eea467307f7ef5a169f53091e7
+          path: joypad-os
+          submodules: recursive
+
+      - name: Install ARM toolchain
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y \
+            gcc-arm-none-eabi libnewlib-arm-none-eabi \
+            cmake ninja-build build-essential python3
+
+      - name: Host-test DualShock 2 state machine
+        run: |
+          cat > /tmp/test_ds2.c <<'EOF'
+          #include <assert.h>
+          #include <stdint.h>
+          #include "ds2_protocol.h"
+          int main(void) {
+              ds2_device_t d;
+              uint8_t reply[32];
+              ds2_device_init(&d);
+              assert(ds2_current_id(&d) == 0x73);
+              uint8_t poll[9] = {1,0x42,0,0,0,0,0,0,0};
+              ds2_exchange_packet(&d, poll, sizeof poll, reply, sizeof reply);
+              assert(reply[0] == 0xFF && reply[1] == 0x73 && reply[2] == 0x5A);
+              uint8_t enter[9] = {1,0x43,0,1,0,0,0,0,0};
+              ds2_exchange_packet(&d, enter, sizeof enter, reply, sizeof reply);
+              assert(d.config_mode);
+              uint8_t pressure[9] = {1,0x4F,0,0xFF,0xFF,0x03,0,0,0};
+              ds2_exchange_packet(&d, pressure, sizeof pressure, reply, sizeof reply);
+              assert(d.pressure_enabled);
+              return 0;
+          }
+          EOF
+          gcc -std=c11 -Wall -Wextra -Werror \
+            -I adapter/overlay/src/native/device/ps2 \
+            /tmp/test_ds2.c adapter/overlay/src/native/device/ps2/ds2_protocol.c \
+            -o /tmp/test_ds2
+          /tmp/test_ds2
+
+      - name: Apply DualSense-to-PS2 target
+        run: python3 adapter/tools/prepare_upstream.py joypad-os
+
+      - name: Configure
+        run: cmake -S joypad-os/src -B build -G Ninja -DPICO_BOARD=pico -DCMAKE_BUILD_TYPE=Release
+
+      - name: Build UF2
+        run: cmake --build build --target joypad_ps2_pico -j 2
+
+      - name: Collect UF2
+        run: |
+          mkdir -p artifact
+          test -f build/joypad_ps2_pico.uf2
+          cp build/joypad_ps2_pico.uf2 artifact/DualSense_PS2_Pico.uf2
+          sha256sum artifact/DualSense_PS2_Pico.uf2 | tee artifact/DualSense_PS2_Pico.uf2.sha256
+
+      - name: Upload UF2 artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: DualSense_PS2_Pico_UF2
+          path: artifact/
+          if-no-files-found: error
