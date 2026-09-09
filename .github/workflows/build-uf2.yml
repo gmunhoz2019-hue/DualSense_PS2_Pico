@@ -67,6 +67,8 @@ jobs:
         run: python3 adapter/tools/prepare_upstream.py joypad-os
 
       - name: Configure
+        env:
+          PICO_TINYUSB_PATH: ${{ github.workspace }}/joypad-os/src/lib/tinyusb
         run: cmake -S joypad-os/src -B build -G Ninja -DPICO_BOARD=pico -DCMAKE_BUILD_TYPE=Release
 
       - name: Build UF2
