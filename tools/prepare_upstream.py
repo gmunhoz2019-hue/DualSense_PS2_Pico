@@ -60,8 +60,13 @@ target_compile_definitions(joypad_ps2_pico PRIVATE
     MAX_PLAYERS=1
     MAX_PLAYERS_PER_OUTPUT=1
 )
+# Keep USB_DEVICE_SOURCES/tinyusb_device linked even though the product is
+# wired-host-only. Joypad core storage/router/player code references shared CDC
+# helpers and TinyUSB device task symbols; without these the final ELF fails at
+# link time. The native USB device stack is not used as the controller input.
 target_sources(joypad_ps2_pico PUBLIC
     ${COMMON_SOURCES}
+    ${USB_DEVICE_SOURCES}
     ${CMAKE_CURRENT_SOURCE_DIR}/native/device/ps2/ds2_protocol.c
     ${CMAKE_CURRENT_SOURCE_DIR}/native/device/ps2/ps2_device.c
     ${CMAKE_CURRENT_SOURCE_DIR}/apps/usb2ps2/app.c
@@ -69,9 +74,11 @@ target_sources(joypad_ps2_pico PUBLIC
 target_include_directories(joypad_ps2_pico PUBLIC
     ${CMAKE_CURRENT_SOURCE_DIR}/apps/usb2ps2
     ${CMAKE_CURRENT_SOURCE_DIR}/native/device/ps2
+    ${CMAKE_CURRENT_SOURCE_DIR}/usb/usbd
 )
 target_link_libraries(joypad_ps2_pico PRIVATE
     ${COMMON_LIBRARIES}
+    tinyusb_device
     tinyusb_pico_pio_usb
     hardware_flash
 )
