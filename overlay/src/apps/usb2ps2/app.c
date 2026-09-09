@@ -37,34 +37,43 @@ static void status_led_init(void) {
     gpio_put(STATUS_LED_PIN, 0);
 }
 
+static bool pulse_pattern(uint32_t now, uint8_t pulses) {
+    const uint32_t period = 2200u;
+    const uint32_t slot = 260u;
+    const uint32_t on_ms = 120u;
+    uint32_t phase = now % period;
+    uint32_t active = (uint32_t)pulses * slot;
+    if (phase >= active) return false;
+    return (phase % slot) < on_ms;
+}
+
 static void status_led_task(void) {
     const uint32_t now = to_ms_since_boot(get_absolute_time());
-    static uint32_t last_ps2_count = 0;
-    static uint32_t last_ps2_seen_ms = 0;
-
-    const uint32_t ps2_count = ps2_transaction_count();
-    if (ps2_count != last_ps2_count) {
-        last_ps2_count = ps2_count;
-        last_ps2_seen_ms = now;
-    }
-
-    bool on = false;
+    static uint8_t highest_stage = 0;
 
     if (playersCount <= 0) {
-        // No DualSense/player yet: one short pulse every 2 s.
-        const uint32_t phase = now % 2000u;
-        on = (phase < 120u);
-    } else if ((now - last_ps2_seen_ms) < 500u) {
-        // DualSense is recognized AND the PS2 ATT line is actively producing
-        // transactions. Fast blink means both halves of the adapter are alive.
-        on = ((now / 100u) & 1u) != 0u;
-    } else {
-        // DualSense recognized, but no PS2 transaction seen recently.
-        // Solid LED isolates the fault to the PS2 wiring/ATT/transport side.
-        on = true;
+        // No DualSense/player: one pulse every cycle.
+        gpio_put(STATUS_LED_PIN, pulse_pattern(now, 1));
+        return;
     }
 
-    gpio_put(STATUS_LED_PIN, on);
+    // Latch the highest PS2 receive stage reached since boot. This makes the
+    // bench test easy to read even when the console polls in short bursts.
+    if (highest_stage < 1) highest_stage = 1; // DualSense recognized
+    if (ps2_transaction_count() > 0 && highest_stage < 2) highest_stage = 2;
+    if (ps2_rx_byte_count() > 0 && highest_stage < 3) highest_stage = 3;
+    if (ps2_address_count() > 0 && highest_stage < 4) highest_stage = 4;
+    if (ps2_poll42_count() > 0 && highest_stage < 5) highest_stage = 5;
+
+    if (highest_stage == 1) {
+        // DualSense OK, but no PS2 ATT transaction seen.
+        gpio_put(STATUS_LED_PIN, 1);
+        return;
+    }
+
+    // 2 = ATT only; 3 = bytes decoded; 4 = valid 0x01 address;
+    // 5 = valid controller poll 0x01 0x42 decoded.
+    gpio_put(STATUS_LED_PIN, pulse_pattern(now, highest_stage));
 }
 
 void app_init(void) {
