@@ -1,0 +1,114 @@
+; PlayStation 1/2 controller-side transport for RP2040.
+; Fixed pins for the DualSense_PS2_Pico hardware:
+;   DATA=GP9, CMD=GP8, ATT=GP7, CLK=GP6, ACK=GP10
+;
+; DATA and ACK are open-drain: the GPIO output latch is held LOW and the
+; PIO only changes pin direction. pindir=1 asserts LOW, pindir=0 releases.
+
+.define PUBLIC PS2_PIN_CLK 6
+.define PUBLIC PS2_PIN_ATT 7
+.define PUBLIC PS2_PIN_CMD 8
+.define PUBLIC PS2_PIN_DATA 9
+.define PUBLIC PS2_PIN_ACK 10
+
+.program ps2_cmd_reader
+; Samples CMD LSB-first on rising CLK edges.
+; jmp pin is ATT, so an aborted transaction cannot leave us stuck mid-byte.
+.wrap_target
+wait_att:
+    wait 0 gpio PS2_PIN_ATT
+    set x, 7
+bit_loop:
+    jmp pin wait_att
+    wait 0 gpio PS2_PIN_CLK
+    jmp pin wait_att
+    wait 1 gpio PS2_PIN_CLK
+    jmp pin wait_att
+    in pins, 1
+    jmp x-- bit_loop
+.wrap
+
+.program ps2_dat_writer
+.side_set 1 pindirs
+; OUT pindir base = DATA. SIDESET pindir base = ACK.
+; Bytes are supplied bitwise-inverted from C:
+;   original 0 -> OUT bit 1 -> output direction -> LOW
+;   original 1 -> OUT bit 0 -> input direction  -> Hi-Z
+;
+; The first command byte of every transaction is naturally answered as 0xFF:
+; this SM is blocked on PULL with DATA released until C receives 0x01 and queues
+; the second response byte (controller ID). Queuing that byte also creates ACK.
+
+release_and_wait:
+    set pindirs, 0 side 0
+.wrap_target
+    wait 0 gpio PS2_PIN_ATT side 0
+    pull block side 0
+    jmp pin release_and_wait side 0
+
+    ; ACK pulse between bytes, following the timing used by proven RP2040 PSX code.
+    nop side 1 [5]
+    set x, 7 side 0 [5]
+
+send_bit:
+    jmp pin release_and_wait side 0
+    wait 1 gpio PS2_PIN_CLK side 0
+    jmp pin release_and_wait side 0
+    wait 0 gpio PS2_PIN_CLK side 0
+    jmp pin release_and_wait side 0
+    out pindirs, 1 side 0
+    jmp x-- send_bit side 0
+
+    ; Hold the final bit through the sampling (rising) edge, then release DATA.
+    wait 1 gpio PS2_PIN_CLK side 0
+    set pindirs, 0 side 0
+.wrap
+
+% c-sdk {
+#define PS2_PIO_CLKDIV 50
+
+static inline void ps2_cmd_reader_program_init(PIO pio, uint sm, uint offset) {
+    pio_sm_config c = ps2_cmd_reader_program_get_default_config(offset);
+    sm_config_set_in_pins(&c, PS2_PIN_CMD);
+    sm_config_set_jmp_pin(&c, PS2_PIN_ATT);
+    sm_config_set_in_shift(&c, true, true, 8);  // LSB first, autopush each byte
+    sm_config_set_fifo_join(&c, PIO_FIFO_JOIN_RX);
+    sm_config_set_clkdiv_int_frac(&c, PS2_PIO_CLKDIV, 0);
+
+    pio_sm_set_consecutive_pindirs(pio, sm, PS2_PIN_CMD, 1, false);
+    pio_sm_set_consecutive_pindirs(pio, sm, PS2_PIN_ATT, 1, false);
+    pio_sm_set_consecutive_pindirs(pio, sm, PS2_PIN_CLK, 1, false);
+    pio_sm_init(pio, sm, offset, &c);
+}
+
+static inline void ps2_dat_writer_program_init(PIO pio, uint sm, uint offset) {
+    pio_sm_config c = ps2_dat_writer_program_get_default_config(offset);
+    sm_config_set_out_pins(&c, PS2_PIN_DATA, 1);
+    sm_config_set_set_pins(&c, PS2_PIN_DATA, 1);
+    sm_config_set_sideset_pins(&c, PS2_PIN_ACK);
+    sm_config_set_jmp_pin(&c, PS2_PIN_ATT);
+    sm_config_set_out_shift(&c, true, true, 8); // LSB first, autopull each byte
+    sm_config_set_fifo_join(&c, PIO_FIFO_JOIN_TX);
+    sm_config_set_clkdiv_int_frac(&c, PS2_PIO_CLKDIV, 0);
+
+    // Fix both output latches LOW. PIO changes only direction afterwards.
+    pio_sm_set_pins_with_mask(pio, sm, 0,
+        (1u << PS2_PIN_DATA) | (1u << PS2_PIN_ACK));
+    pio_sm_set_consecutive_pindirs(pio, sm, PS2_PIN_DATA, 1, false);
+    pio_sm_set_consecutive_pindirs(pio, sm, PS2_PIN_ACK, 1, false);
+    pio_gpio_init(pio, PS2_PIN_DATA);
+    pio_gpio_init(pio, PS2_PIN_ACK);
+
+    pio_sm_set_consecutive_pindirs(pio, sm, PS2_PIN_ATT, 1, false);
+    pio_sm_set_consecutive_pindirs(pio, sm, PS2_PIN_CLK, 1, false);
+    pio_sm_init(pio, sm, offset, &c);
+}
+
+static inline uint8_t ps2_read_byte_blocking(PIO pio, uint sm) {
+    return (uint8_t)(pio_sm_get_blocking(pio, sm) >> 24);
+}
+
+static inline void ps2_write_byte_blocking(PIO pio, uint sm, uint8_t byte) {
+    pio_sm_put_blocking(pio, sm, (uint32_t)(~byte) & 0xFFu);
+}
+%}
