@@ -197,6 +197,7 @@ static void ps2_core1_task(void) {
 
 uint8_t ps2_rumble_large(void) { return g_ds2.rumble_large; }
 uint8_t ps2_rumble_small(void) { return g_ds2.rumble_small; }
+uint32_t ps2_transaction_count(void) { return g_att_epoch; }
 
 const OutputInterface ps2_output_interface = {
     .name = "PlayStation 2 DualShock 2",
