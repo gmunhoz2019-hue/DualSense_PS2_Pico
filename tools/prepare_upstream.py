@@ -52,6 +52,7 @@ block = r'''
 add_executable(joypad_ps2_pico)
 target_compile_definitions(joypad_ps2_pico PRIVATE
     CONFIG_USB=1
+    CONFIG_PIO_USB_DP_PIN=0
     PICO_DEFAULT_PIO_USB_DP_PIN=0
     BOARD_TUH_RHPORT=1
     CONFIG_NO_NEOPIXEL=1
@@ -62,6 +63,7 @@ target_compile_definitions(joypad_ps2_pico PRIVATE
 )
 target_sources(joypad_ps2_pico PUBLIC
     ${COMMON_SOURCES}
+    ${USB_DEVICE_SOURCES}
     ${CMAKE_CURRENT_SOURCE_DIR}/native/device/ps2/ds2_protocol.c
     ${CMAKE_CURRENT_SOURCE_DIR}/native/device/ps2/ps2_device.c
     ${CMAKE_CURRENT_SOURCE_DIR}/apps/usb2ps2/app.c
@@ -69,9 +71,11 @@ target_sources(joypad_ps2_pico PUBLIC
 target_include_directories(joypad_ps2_pico PUBLIC
     ${CMAKE_CURRENT_SOURCE_DIR}/apps/usb2ps2
     ${CMAKE_CURRENT_SOURCE_DIR}/native/device/ps2
+    ${CMAKE_CURRENT_SOURCE_DIR}/usb/usbd
 )
 target_link_libraries(joypad_ps2_pico PRIVATE
     ${COMMON_LIBRARIES}
+    tinyusb_device
     tinyusb_pico_pio_usb
     hardware_flash
 )
