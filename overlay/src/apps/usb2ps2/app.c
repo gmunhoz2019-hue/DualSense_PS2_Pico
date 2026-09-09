@@ -39,21 +39,29 @@ static void status_led_init(void) {
 
 static void status_led_task(void) {
     const uint32_t now = to_ms_since_boot(get_absolute_time());
-    const uint8_t usb_count = usbh_get_device_count();
+    static uint32_t last_ps2_count = 0;
+    static uint32_t last_ps2_seen_ms = 0;
+
+    const uint32_t ps2_count = ps2_transaction_count();
+    if (ps2_count != last_ps2_count) {
+        last_ps2_count = ps2_count;
+        last_ps2_seen_ms = now;
+    }
+
     bool on = false;
 
-    if (playersCount > 0) {
-        // DualSense recognized and assigned: solid ON.
-        on = true;
-    } else if (usb_count > 0) {
-        // A USB device enumerated on GP0/GP1, but no gamepad player has been
-        // assigned yet. Rapid blink lets us distinguish electrical USB success
-        // from HID/driver/player-routing problems.
-        on = ((now / 200u) & 1u) != 0u;
-    } else {
-        // Nothing enumerated on the PIO-USB port: one short pulse every 2 sec.
+    if (playersCount <= 0) {
+        // No DualSense/player yet: one short pulse every 2 s.
         const uint32_t phase = now % 2000u;
         on = (phase < 120u);
+    } else if ((now - last_ps2_seen_ms) < 500u) {
+        // DualSense is recognized AND the PS2 ATT line is actively producing
+        // transactions. Fast blink means both halves of the adapter are alive.
+        on = ((now / 100u) & 1u) != 0u;
+    } else {
+        // DualSense recognized, but no PS2 transaction seen recently.
+        // Solid LED isolates the fault to the PS2 wiring/ATT/transport side.
+        on = true;
     }
 
     gpio_put(STATUS_LED_PIN, on);
@@ -104,8 +112,6 @@ void app_task(void) {
     }
 
     if (large != last_large || small != last_small) {
-        // Route the PS2 vibration request back through Joypad's USB-host feedback
-        // layer. The Sony DualSense USB driver converts that into report 0x02.
         feedback_set_rumble(0, large, small);
         last_large = large;
         last_small = small;
