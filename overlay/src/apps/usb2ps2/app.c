@@ -38,9 +38,9 @@ static void status_led_init(void) {
 }
 
 static bool pulse_pattern(uint32_t now, uint8_t pulses) {
-    const uint32_t period = 2200u;
-    const uint32_t slot = 260u;
-    const uint32_t on_ms = 120u;
+    const uint32_t period = 3600u;
+    const uint32_t slot = 300u;
+    const uint32_t on_ms = 110u;
     uint32_t phase = now % period;
     uint32_t active = (uint32_t)pulses * slot;
     if (phase >= active) return false;
@@ -49,7 +49,6 @@ static bool pulse_pattern(uint32_t now, uint8_t pulses) {
 
 static void status_led_task(void) {
     const uint32_t now = to_ms_since_boot(get_absolute_time());
-    static uint8_t highest_stage = 0;
 
     if (playersCount <= 0) {
         // No DualSense/player: one pulse every cycle.
@@ -57,23 +56,44 @@ static void status_led_task(void) {
         return;
     }
 
-    // Latch the highest PS2 receive stage reached since boot. This makes the
-    // bench test easy to read even when the console polls in short bursts.
-    if (highest_stage < 1) highest_stage = 1; // DualSense recognized
-    if (ps2_transaction_count() > 0 && highest_stage < 2) highest_stage = 2;
-    if (ps2_rx_byte_count() > 0 && highest_stage < 3) highest_stage = 3;
-    if (ps2_address_count() > 0 && highest_stage < 4) highest_stage = 4;
-    if (ps2_poll42_count() > 0 && highest_stage < 5) highest_stage = 5;
-
-    if (highest_stage == 1) {
+    if (ps2_transaction_count() == 0) {
         // DualSense OK, but no PS2 ATT transaction seen.
         gpio_put(STATUS_LED_PIN, 1);
         return;
     }
 
-    // 2 = ATT only; 3 = bytes decoded; 4 = valid 0x01 address;
-    // 5 = valid controller poll 0x01 0x42 decoded.
-    gpio_put(STATUS_LED_PIN, pulse_pattern(now, highest_stage));
+    if (ps2_rx_byte_count() == 0) {
+        // ATT reaches the Pico, but CLK/CMD never produced a decoded byte.
+        gpio_put(STATUS_LED_PIN, pulse_pattern(now, 2));
+        return;
+    }
+
+    // v7 diagnostic classification of the FIRST command byte from the PS2.
+    // Expected first byte is 0x01.
+    //
+    // 3 pulses = first byte seen as 0xFF (CMD likely high/floating/wrong wire)
+    // 4 pulses = first byte seen as 0x00 (CMD likely low/shorted/wrong wire)
+    // 5 pulses = first byte seen as 0x80 (classic bit-order/edge symptom)
+    // 6 pulses = another unexpected first-byte value
+    // 7 pulses = valid 0x01 seen, but no 0x42 command yet
+    // 8 pulses = valid 0x01 0x42 poll decoded
+    uint8_t pulses = 6;
+
+    if (ps2_poll42_count() > 0 && ps2_address_count() > 0) {
+        pulses = 8;
+    } else if (ps2_address_count() > 0) {
+        pulses = 7;
+    } else if (ps2_first_80_count() > 0) {
+        pulses = 5;
+    } else if (ps2_first_ff_count() > 0) {
+        pulses = 3;
+    } else if (ps2_first_00_count() > 0) {
+        pulses = 4;
+    } else {
+        pulses = 6;
+    }
+
+    gpio_put(STATUS_LED_PIN, pulse_pattern(now, pulses));
 }
 
 void app_init(void) {
