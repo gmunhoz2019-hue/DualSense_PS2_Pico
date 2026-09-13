@@ -27,6 +27,12 @@ static volatile uint32_t g_att_epoch = 0;
 static volatile uint32_t g_rx_byte_count = 0;
 static volatile uint32_t g_address_count = 0;
 static volatile uint32_t g_poll42_count = 0;
+static volatile uint32_t g_first_ff_count = 0;
+static volatile uint32_t g_first_00_count = 0;
+static volatile uint32_t g_first_80_count = 0;
+static volatile uint32_t g_first_other_count = 0;
+static volatile uint8_t g_last_first_byte = 0xFF;
+static volatile uint8_t g_last_second_byte = 0xFF;
 
 static inline void set_active_low(uint8_t *v, uint8_t mask, bool pressed) {
     if (pressed) *v &= (uint8_t)~mask;
@@ -194,8 +200,24 @@ static void ps2_core1_task(void) {
         // actual decoded CLK/CMD bytes and a real 0x01 0x42 controller poll.
         uint8_t byte_index = session.byte_index;
         g_rx_byte_count++;
-        if (byte_index == 0 && rx == 0x01) g_address_count++;
-        if (byte_index == 1 && rx == 0x42) g_poll42_count++;
+        if (byte_index == 0) {
+            g_last_first_byte = rx;
+            if (rx == 0x01) {
+                g_address_count++;
+            } else if (rx == 0xFF) {
+                g_first_ff_count++;
+            } else if (rx == 0x00) {
+                g_first_00_count++;
+            } else if (rx == 0x80) {
+                g_first_80_count++;
+            } else {
+                g_first_other_count++;
+            }
+        }
+        if (byte_index == 1) {
+            g_last_second_byte = rx;
+            if (rx == 0x42) g_poll42_count++;
+        }
 
         ds2_session_rx(&session, rx);
 
@@ -211,6 +233,12 @@ uint32_t ps2_transaction_count(void) { return g_att_epoch; }
 uint32_t ps2_rx_byte_count(void) { return g_rx_byte_count; }
 uint32_t ps2_address_count(void) { return g_address_count; }
 uint32_t ps2_poll42_count(void) { return g_poll42_count; }
+uint32_t ps2_first_ff_count(void) { return g_first_ff_count; }
+uint32_t ps2_first_00_count(void) { return g_first_00_count; }
+uint32_t ps2_first_80_count(void) { return g_first_80_count; }
+uint32_t ps2_first_other_count(void) { return g_first_other_count; }
+uint8_t ps2_last_first_byte(void) { return g_last_first_byte; }
+uint8_t ps2_last_second_byte(void) { return g_last_second_byte; }
 
 const OutputInterface ps2_output_interface = {
     .name = "PlayStation 2 DualShock 2",
